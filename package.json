@@ -1,5 +1,5 @@
 {
-  "name": "EggtartScript",
+  "name": "eggtart-script",
   "version": "1.0.0",
   "description": "Cloudflare Worker for Eggtart subscription proxy and Clash YAML transforms",
   "type": "module",
