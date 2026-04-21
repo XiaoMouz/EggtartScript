@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { transformClashYaml } from "../src/clash-transform.ts";
 
-test("applies rename/delete/proxy-chain/rule append transforms", () => {
+test("prepends rules and removes deleted proxies from proxy groups", () => {
   const input = `
 proxies:
   - name: HK-A
@@ -13,6 +13,13 @@ proxies:
     type: ss
     server: us.example.com
     port: 443
+proxy-groups:
+  - name: Auto
+    type: select
+    proxies:
+      - HK-A
+      - US-B
+      - DIRECT
 rules:
   - MATCH,DIRECT
 `;
@@ -27,6 +34,8 @@ rules:
 
   assert.match(output, /name: HKG-A/);
   assert.doesNotMatch(output, /name: US-B/);
+  assert.match(output, /proxy-groups:[\s\S]*- HKG-A[\s\S]*- DIRECT/);
+  assert.doesNotMatch(output, /proxy-groups:[\s\S]*- US-B/);
   assert.match(output, /dialer-proxy: Chain-Node/);
-  assert.match(output, /DOMAIN-SUFFIX,github\.com,Proxy/);
+  assert.match(output, /rules:\n\s+- DOMAIN-SUFFIX,github\.com,Proxy\n\s+- MATCH,DIRECT/);
 });
