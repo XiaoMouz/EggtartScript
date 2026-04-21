@@ -10,8 +10,7 @@
   --accent-foreground: #17110a;
   --ring: rgba(228, 179, 99, 0.42);
   font-family:
-    "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "URW Palladio L",
-    "Source Serif 4", serif;
+    "Google Sans", "Google Sans Text", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   color: var(--foreground);
   background: var(--background);
 }
@@ -38,15 +37,14 @@ input,
 textarea,
 table {
   font-family:
-    "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "URW Palladio L",
-    "Source Serif 4", serif;
+    "Google Sans", "Google Sans Text", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
 }
 
 code,
 pre,
 textarea.font-mono,
 .font-mono {
-  font-family: "SF Mono", "IBM Plex Mono", "Cascadia Mono", Consolas, monospace;
+  font-family: "Google Sans Code", "SF Mono", "IBM Plex Mono", "Cascadia Mono", Consolas, monospace;
 }
 
 #root {

@@ -1,4 +1,15 @@
-import type { FetchSubscriptionParams, HttpError } from "./types.ts";
+import type { FetchSubscriptionParams, HttpError, SubscriptionFetchResult } from "./types.ts";
+
+const SUBSCRIPTION_METADATA_HEADERS = [
+  "subscription-userinfo",
+  "profile-title",
+  "content-disposition",
+  "profile-update-interval",
+  "profile-web-page-url",
+  "support-url",
+  "moved-permanently-to",
+  "dns",
+] as const;
 
 function httpError(message: string, status = 502, details?: unknown): HttpError {
   const error = new Error(message) as HttpError;
@@ -39,7 +50,22 @@ async function requestJson(url: string, init: RequestInit, timeoutMs: number): P
   }
 }
 
-async function requestText(url: string, init: RequestInit, timeoutMs: number): Promise<string> {
+function extractSubscriptionMetadataHeaders(headers: Headers): Record<string, string> {
+  const metadataHeaders: Record<string, string> = {};
+  for (const key of SUBSCRIPTION_METADATA_HEADERS) {
+    const value = headers.get(key);
+    if (value) {
+      metadataHeaders[key] = value;
+    }
+  }
+  return metadataHeaders;
+}
+
+async function requestText(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<{ text: string; metadataHeaders: Record<string, string> }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -49,7 +75,10 @@ async function requestText(url: string, init: RequestInit, timeoutMs: number): P
     if (!response.ok) {
       throw httpError(`Upstream request failed: ${response.status}`, 502, { url, body: text.slice(0, 500) });
     }
-    return text;
+    return {
+      text,
+      metadataHeaders: extractSubscriptionMetadataHeaders(response.headers),
+    };
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw httpError("Upstream request timed out", 504, { url });
@@ -78,7 +107,7 @@ export async function fetchSubscriptionYaml({
   clashUserAgent,
   subscribeHeaders = {},
   timeoutMs,
-}: FetchSubscriptionParams): Promise<{ yamlText: string; authData: string; subscribeUrl: string }> {
+}: FetchSubscriptionParams): Promise<SubscriptionFetchResult> {
   const loginUrl = `${baseUrl}/passport/auth/login`;
   const subscribeInfoUrl = `${baseUrl}/user/getSubscribe`;
   const loginPayload = { email, password };
@@ -120,7 +149,7 @@ export async function fetchSubscriptionYaml({
     subscribeResponse,
   );
 
-  const yamlText = await requestText(
+  const { text: yamlText, metadataHeaders } = await requestText(
     subscribeUrl,
     {
       method: "GET",
@@ -132,5 +161,5 @@ export async function fetchSubscriptionYaml({
     timeoutMs,
   );
 
-  return { yamlText, authData, subscribeUrl };
+  return { yamlText, authData, subscribeUrl, metadataHeaders };
 }

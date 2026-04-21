@@ -1,23 +1,44 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
+  Activity,
   ArrowRightLeft,
   BadgeCheck,
+  CalendarClock,
   Cable,
+  ChartNoAxesCombined,
+  Download,
   KeyRound,
   LogOut,
   PencilRuler,
   Plus,
+  RefreshCw,
   Save,
   Shield,
   Trash2,
 } from "lucide-react";
-import { fetchConfig, logout, saveConfig } from "./lib/api";
-import type { DeleteRule, EditableConfigPayload, ProxyChainEntry, RenameRule } from "./lib/types";
+import {
+  fetchConfig,
+  fetchSubscriptionMetadata,
+  logout,
+  saveConfig,
+} from "./lib/api";
+import type {
+  DeleteRule,
+  EditableConfigPayload,
+  ProxyChainEntry,
+  RenameRule,
+  SubscriptionMetadataSnapshot,
+} from "./lib/types";
 import { Alert, AlertDescription, AlertTitle } from "./components/ui/alert";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "./components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -29,7 +50,14 @@ import {
 import { Input } from "./components/ui/input";
 import { ScrollArea } from "./components/ui/scroll-area";
 import { Separator } from "./components/ui/separator";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { Textarea } from "./components/ui/textarea";
 
@@ -47,6 +75,20 @@ type SaveState =
   | { tone: "success"; message: string }
   | { tone: "error"; message: string };
 
+type MetadataState =
+  | { tone: "idle"; message: string; data: SubscriptionMetadataSnapshot | null }
+  | {
+      tone: "loading";
+      message: string;
+      data: SubscriptionMetadataSnapshot | null;
+    }
+  | { tone: "success"; message: string; data: SubscriptionMetadataSnapshot }
+  | {
+      tone: "error";
+      message: string;
+      data: SubscriptionMetadataSnapshot | null;
+    };
+
 function createEmptyProxyChain(): ProxyChainEntry {
   return { target: "", dialer: "" };
 }
@@ -59,11 +101,15 @@ function createEmptyDeleteRule(): DeleteRule {
   return { pattern: "", flags: "" };
 }
 
-function objectEntries(headers: Record<string, string>): Array<{ key: string; value: string }> {
+function objectEntries(
+  headers: Record<string, string>,
+): Array<{ key: string; value: string }> {
   return Object.entries(headers).map(([key, value]) => ({ key, value }));
 }
 
-function toHeaderRecord(rows: Array<{ key: string; value: string }>): Record<string, string> {
+function toHeaderRecord(
+  rows: Array<{ key: string; value: string }>,
+): Record<string, string> {
   return Object.fromEntries(
     rows
       .map((row) => ({ key: row.key.trim(), value: row.value.trim() }))
@@ -79,14 +125,53 @@ function normalizeRules(value: string): string[] {
     .filter(Boolean);
 }
 
-function useDerivedStatus(config: EditableConfigPayload, initialToken: string): Array<{ label: string; value: string }> {
+function formatBytes(value: number | null): string {
+  if (value == null) return "Unavailable";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let current = value;
+  let unitIndex = 0;
+  while (current >= 1024 && unitIndex < units.length - 1) {
+    current /= 1024;
+    unitIndex += 1;
+  }
+  return `${current.toFixed(current >= 100 || unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`;
+}
+
+function formatTimestamp(value: number | null): string {
+  if (value == null) return "Unavailable";
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value * 1000));
+}
+
+function formatUsedTraffic(data: SubscriptionMetadataSnapshot | null): string {
+  if (!data) return "Unavailable";
+  if (data.uploadBytes == null && data.downloadBytes == null)
+    return "Unavailable";
+  return formatBytes((data.uploadBytes || 0) + (data.downloadBytes || 0));
+}
+
+function useDerivedStatus(
+  config: EditableConfigPayload,
+  initialToken: string,
+): Array<{ label: string; value: string }> {
   return useMemo(
     () => [
       { label: "Rules", value: String(config.rules.length) },
       { label: "Proxy chains", value: String(config.proxyChain.length) },
-      { label: "Regex transforms", value: String(config.renameRules.length + config.deleteRules.length) },
+      {
+        label: "Regex transforms",
+        value: String(config.renameRules.length + config.deleteRules.length),
+      },
       { label: "Headers", value: String(Object.keys(config.headers).length) },
-      { label: "Token changed", value: config.accessToken !== initialToken ? "Yes" : "No" },
+      {
+        label: "Token changed",
+        value: config.accessToken !== initialToken ? "Yes" : "No",
+      },
     ],
     [config, initialToken],
   );
@@ -95,12 +180,22 @@ function useDerivedStatus(config: EditableConfigPayload, initialToken: string): 
 export function App(): React.JSX.Element {
   const [config, setConfig] = useState<EditableConfigPayload>(EMPTY_CONFIG);
   const [initialAccessToken, setInitialAccessToken] = useState("");
-  const [headerRows, setHeaderRows] = useState<Array<{ key: string; value: string }>>([]);
+  const [headerRows, setHeaderRows] = useState<
+    Array<{ key: string; value: string }>
+  >([]);
   const [rulesText, setRulesText] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [status, setStatus] = useState<SaveState>({ tone: "idle", message: "KV-backed control room ready." });
+  const [status, setStatus] = useState<SaveState>({
+    tone: "idle",
+    message: "KV-backed control room ready.",
+  });
+  const [metadataState, setMetadataState] = useState<MetadataState>({
+    tone: "idle",
+    message: "Fetch the current subscription headers from the live endpoint.",
+    data: null,
+  });
 
   useEffect(() => {
     let active = true;
@@ -111,10 +206,14 @@ export function App(): React.JSX.Element {
         setInitialAccessToken(nextConfig.accessToken);
         setHeaderRows(objectEntries(nextConfig.headers));
         setRulesText(nextConfig.rules.join("\n"));
+        void refreshSubscriptionSnapshot(nextConfig.accessToken);
       })
       .catch((error) => {
         if (!active) return;
-        setStatus({ tone: "error", message: error instanceof Error ? error.message : String(error) });
+        setStatus({
+          tone: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -137,6 +236,41 @@ export function App(): React.JSX.Element {
     patchConfig({ headers: toHeaderRecord(rows) });
   }
 
+  async function refreshSubscriptionSnapshot(
+    token = config.accessToken,
+  ): Promise<void> {
+    if (!token.trim()) {
+      setMetadataState({
+        tone: "error",
+        message:
+          "Access token is empty. Save a token before checking subscription metadata.",
+        data: null,
+      });
+      return;
+    }
+
+    setMetadataState((current) => ({
+      tone: "loading",
+      message: "Requesting subscription headers...",
+      data: current.data,
+    }));
+
+    try {
+      const metadata = await fetchSubscriptionMetadata(token);
+      setMetadataState({
+        tone: "success",
+        message: "Live subscription headers loaded.",
+        data: metadata,
+      });
+    } catch (error) {
+      setMetadataState((current) => ({
+        tone: "error",
+        message: error instanceof Error ? error.message : String(error),
+        data: current.data,
+      }));
+    }
+  }
+
   async function persist(): Promise<void> {
     setSaving(true);
     setStatus({ tone: "idle", message: "Publishing updates to KV..." });
@@ -152,9 +286,16 @@ export function App(): React.JSX.Element {
       setRulesText(result.config.rules.join("\n"));
       setHeaderRows(objectEntries(result.config.headers));
       setInitialAccessToken(result.config.accessToken);
-      setStatus({ tone: "success", message: `Saved at ${new Date(result.savedAt).toLocaleString()}.` });
+      setStatus({
+        tone: "success",
+        message: `Saved at ${new Date(result.savedAt).toLocaleString()}.`,
+      });
+      void refreshSubscriptionSnapshot(result.config.accessToken);
     } catch (error) {
-      setStatus({ tone: "error", message: error instanceof Error ? error.message : String(error) });
+      setStatus({
+        tone: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
     } finally {
       setSaving(false);
       setConfirmOpen(false);
@@ -184,8 +325,9 @@ export function App(): React.JSX.Element {
                     A secure editing cockpit for the subscription pipeline.
                   </CardTitle>
                   <CardDescription className="max-w-2xl text-base">
-                    Adjust transform rules, header overrides, proxy chaining, and the public access token from one guarded
-                    console. Every save writes straight to Cloudflare KV.
+                    Adjust transform rules, header overrides, proxy chaining,
+                    and the public access token from one guarded console. Every
+                    save writes straight to Cloudflare KV.
                   </CardDescription>
                 </div>
               </div>
@@ -194,7 +336,12 @@ export function App(): React.JSX.Element {
                   <LogOut className="h-4 w-4" />
                   Logout
                 </Button>
-                <Button onClick={() => (accessTokenChanged ? setConfirmOpen(true) : void persist())} disabled={saving || loading}>
+                <Button
+                  onClick={() =>
+                    accessTokenChanged ? setConfirmOpen(true) : void persist()
+                  }
+                  disabled={saving || loading}
+                >
                   <Save className="h-4 w-4" />
                   {saving ? "Saving..." : "Save changes"}
                 </Button>
@@ -206,62 +353,166 @@ export function App(): React.JSX.Element {
                   key={metric.label}
                   className="rounded-[24px] border border-white/8 bg-black/15 px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
                 >
-                  <div className="text-[11px] uppercase tracking-[0.22em] text-[var(--muted-foreground)]">{metric.label}</div>
-                  <div className="mt-3 font-serif text-3xl text-[var(--foreground)]">{metric.value}</div>
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-[var(--muted-foreground)]">
+                    {metric.label}
+                  </div>
+                  <div className="mt-3 font-serif text-3xl text-[var(--foreground)]">
+                    {metric.value}
+                  </div>
                 </div>
               ))}
-            </CardContent>
-          </Card>
-
-          <Card className="overflow-hidden">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-3 text-3xl">
-                <Shield className="h-7 w-7 text-[var(--accent)]" />
-                Security posture
-              </CardTitle>
-              <CardDescription>
-                Admin traffic is locked behind a signed cookie session. Subscription access still flows through a dedicated path token.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
               {status.tone !== "idle" ? (
-                <Alert variant={status.tone === "error" ? "destructive" : "default"}>
-                  <AlertTitle>{status.tone === "error" ? "Save blocked" : "Configuration synced"}</AlertTitle>
+                <Alert
+                  className="md:col-span-5"
+                  variant={status.tone === "error" ? "destructive" : "default"}
+                >
+                  <AlertTitle>
+                    {status.tone === "error"
+                      ? "Save blocked"
+                      : "Configuration synced"}
+                  </AlertTitle>
                   <AlertDescription>{status.message}</AlertDescription>
                 </Alert>
               ) : (
-                <Alert>
+                <Alert className="md:col-span-5">
                   <AlertTitle>Ready for edits</AlertTitle>
                   <AlertDescription>{status.message}</AlertDescription>
                 </Alert>
               )}
-
-              <div className="grid gap-3">
-                {[
-                  { icon: <BadgeCheck className="h-4 w-4" />, title: "Session-backed UI", body: "The React app stays behind a signed HttpOnly cookie after the initial /admin/{token} handshake." },
-                  { icon: <KeyRound className="h-4 w-4" />, title: "Access token rotation", body: "You can rotate the public subscription token without touching the admin token stored offline." },
-                  { icon: <ArrowRightLeft className="h-4 w-4" />, title: "KV normalization", body: "Arrays and header maps are normalized before being written, reducing broken JSON states." },
-                ].map((item) => (
-                  <div key={item.title} className="rounded-[20px] border border-white/8 bg-white/[0.03] px-4 py-4">
-                    <div className="flex items-center gap-3 text-sm font-semibold text-[var(--foreground)]">
-                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[rgba(228,179,99,0.14)] text-[var(--accent)]">
-                        {item.icon}
-                      </span>
-                      {item.title}
-                    </div>
-                    <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">{item.body}</p>
-                  </div>
-                ))}
-              </div>
             </CardContent>
           </Card>
+
+          <div className="grid gap-6">
+            <Card className="overflow-hidden">
+              <CardHeader className="gap-4 md:flex-row md:items-end md:justify-between">
+                <div className="space-y-2">
+                  <CardTitle className="flex items-center gap-3 text-3xl">
+                    <Activity className="h-7 w-7 text-[var(--accent)]" />
+                    Subscription snapshot
+                  </CardTitle>
+                  <CardDescription>
+                    Reads the live subscription response headers with `HEAD
+                    /sub/{"{accessToken}"}` and surfaces title, traffic, total
+                    quota, and expiry.
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="secondary"
+                  onClick={() => void refreshSubscriptionSnapshot()}
+                  disabled={metadataState.tone === "loading" || loading}
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 ${metadataState.tone === "loading" ? "animate-spin" : ""}`}
+                  />
+                  {metadataState.tone === "loading" ? "Checking..." : "Refresh"}
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Alert
+                  variant={
+                    metadataState.tone === "error" ? "destructive" : "default"
+                  }
+                >
+                  <AlertTitle>
+                    {metadataState.tone === "success"
+                      ? "Live subscription detected"
+                      : metadataState.tone === "loading"
+                        ? "Reading headers"
+                        : metadataState.tone === "error"
+                          ? "Snapshot unavailable"
+                          : "No snapshot yet"}
+                  </AlertTitle>
+                  <AlertDescription>{metadataState.message}</AlertDescription>
+                </Alert>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {[
+                    {
+                      icon: <BadgeCheck className="h-4 w-4" />,
+                      label: "Profile title",
+                      value: metadataState.data?.profileTitle || "Unavailable",
+                    },
+                    {
+                      icon: <Download className="h-4 w-4" />,
+                      label: "Used traffic",
+                      value: formatUsedTraffic(metadataState.data),
+                    },
+                    {
+                      icon: <ChartNoAxesCombined className="h-4 w-4" />,
+                      label: "Total quota",
+                      value: formatBytes(
+                        metadataState.data?.totalBytes ?? null,
+                      ),
+                    },
+                    {
+                      icon: <CalendarClock className="h-4 w-4" />,
+                      label: "Expire time",
+                      value: formatTimestamp(
+                        metadataState.data?.expireAt ?? null,
+                      ),
+                    },
+                  ].map((item) => (
+                    <div
+                      key={item.label}
+                      className="rounded-[20px] border border-white/8 bg-black/12 px-4 py-4"
+                    >
+                      <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--muted-foreground)]">
+                        <span className="text-[var(--accent)]">
+                          {item.icon}
+                        </span>
+                        {item.label}
+                      </div>
+                      <div className="mt-3 text-lg font-medium text-[var(--foreground)]">
+                        {item.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid gap-3 rounded-[22px] border border-white/8 bg-black/12 p-4">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--muted-foreground)]">
+                    Raw headers
+                  </div>
+                  <div className="grid gap-3 text-sm leading-6 text-[var(--muted-foreground)]">
+                    <div>
+                      <span className="font-medium text-[var(--foreground)]">
+                        subscription-userinfo:
+                      </span>{" "}
+                      <span className="font-mono">
+                        {metadataState.data?.rawUserInfo || "Unavailable"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="font-medium text-[var(--foreground)]">
+                        content-disposition:
+                      </span>{" "}
+                      <span className="font-mono">
+                        {metadataState.data?.contentDisposition ||
+                          "Unavailable"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="font-medium text-[var(--foreground)]">
+                        profile-update-interval:
+                      </span>{" "}
+                      <span className="font-mono">
+                        {metadataState.data?.profileUpdateInterval ||
+                          "Unavailable"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </section>
 
         <Card className="overflow-hidden">
           <CardHeader className="pb-4">
             <CardTitle className="text-3xl">Editable config surface</CardTitle>
             <CardDescription>
-              Each panel maps directly to one KV structure used by the Worker transform chain. Empty rows are ignored on save.
+              Each panel maps directly to one KV structure used by the Worker
+              transform chain. Empty rows are ignored on save.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -288,7 +539,11 @@ export function App(): React.JSX.Element {
                           <PencilRuler className="h-5 w-5 text-[var(--accent)]" />
                           Clash rules
                         </CardTitle>
-                        <CardDescription>One rule per line. The Worker appends these to the upstream Clash YAML.</CardDescription>
+                        <CardDescription>
+                          One rule per line. The Worker prepends these to the
+                          upstream Clash YAML so they win first-match
+                          evaluation.
+                        </CardDescription>
                       </CardHeader>
                       <CardContent>
                         <Textarea
@@ -306,14 +561,29 @@ export function App(): React.JSX.Element {
 
                     <Card className="border-white/8 bg-black/10">
                       <CardHeader>
-                        <CardTitle className="text-2xl">Editing notes</CardTitle>
+                        <CardTitle className="text-2xl">
+                          Editing notes
+                        </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-4 text-sm leading-7 text-[var(--muted-foreground)]">
-                        <p>Use this panel for raw Clash rule lines only. The system preserves order exactly as shown after trimming blank lines.</p>
+                        <p>
+                          Use this panel for raw Clash rule lines only. The
+                          system preserves order exactly as shown after trimming
+                          blank lines.
+                        </p>
                         <Separator />
-                        <p>Typical examples include policy routing, suffix routing, and final `MATCH` fallbacks. The save button writes the normalized array to the KV key `rules`.</p>
+                        <p>
+                          Typical examples include policy routing, suffix
+                          routing, and final `MATCH` fallbacks. The save button
+                          writes the normalized array to the KV key `rules` and
+                          places it at the top of the final profile.
+                        </p>
                         <Separator />
-                        <p>The public subscription endpoint starts using new rules on the very next request. There is no delayed publish step.</p>
+                        <p>
+                          The public subscription endpoint starts using new
+                          rules on the very next request. There is no delayed
+                          publish step.
+                        </p>
                       </CardContent>
                     </Card>
                   </section>
@@ -325,7 +595,14 @@ export function App(): React.JSX.Element {
                     title="Proxy chain"
                     description="Assign dialer proxies to specific target nodes."
                     addLabel="Add chain rule"
-                    onAdd={() => patchConfig({ proxyChain: [...config.proxyChain, createEmptyProxyChain()] })}
+                    onAdd={() =>
+                      patchConfig({
+                        proxyChain: [
+                          ...config.proxyChain,
+                          createEmptyProxyChain(),
+                        ],
+                      })
+                    }
                   >
                     <Table>
                       <TableHeader>
@@ -343,8 +620,14 @@ export function App(): React.JSX.Element {
                                 value={row.target}
                                 onChange={(event) =>
                                   patchConfig({
-                                    proxyChain: config.proxyChain.map((item, itemIndex) =>
-                                      itemIndex === index ? { ...item, target: event.target.value } : item,
+                                    proxyChain: config.proxyChain.map(
+                                      (item, itemIndex) =>
+                                        itemIndex === index
+                                          ? {
+                                              ...item,
+                                              target: event.target.value,
+                                            }
+                                          : item,
                                     ),
                                   })
                                 }
@@ -356,8 +639,14 @@ export function App(): React.JSX.Element {
                                 value={row.dialer}
                                 onChange={(event) =>
                                   patchConfig({
-                                    proxyChain: config.proxyChain.map((item, itemIndex) =>
-                                      itemIndex === index ? { ...item, dialer: event.target.value } : item,
+                                    proxyChain: config.proxyChain.map(
+                                      (item, itemIndex) =>
+                                        itemIndex === index
+                                          ? {
+                                              ...item,
+                                              dialer: event.target.value,
+                                            }
+                                          : item,
                                     ),
                                   })
                                 }
@@ -368,7 +657,13 @@ export function App(): React.JSX.Element {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => patchConfig({ proxyChain: config.proxyChain.filter((_, itemIndex) => itemIndex !== index) })}
+                                onClick={() =>
+                                  patchConfig({
+                                    proxyChain: config.proxyChain.filter(
+                                      (_, itemIndex) => itemIndex !== index,
+                                    ),
+                                  })
+                                }
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -382,11 +677,20 @@ export function App(): React.JSX.Element {
 
                 <TabsContent value="rename">
                   <EditorTableCard
-                    icon={<ArrowRightLeft className="h-5 w-5 text-[var(--accent)]" />}
+                    icon={
+                      <ArrowRightLeft className="h-5 w-5 text-[var(--accent)]" />
+                    }
                     title="Rename rules"
                     description="Regex-based node renaming applied before delete and chain stages."
                     addLabel="Add rename rule"
-                    onAdd={() => patchConfig({ renameRules: [...config.renameRules, createEmptyRenameRule()] })}
+                    onAdd={() =>
+                      patchConfig({
+                        renameRules: [
+                          ...config.renameRules,
+                          createEmptyRenameRule(),
+                        ],
+                      })
+                    }
                   >
                     <Table>
                       <TableHeader>
@@ -405,8 +709,14 @@ export function App(): React.JSX.Element {
                                 value={row.pattern}
                                 onChange={(event) =>
                                   patchConfig({
-                                    renameRules: config.renameRules.map((item, itemIndex) =>
-                                      itemIndex === index ? { ...item, pattern: event.target.value } : item,
+                                    renameRules: config.renameRules.map(
+                                      (item, itemIndex) =>
+                                        itemIndex === index
+                                          ? {
+                                              ...item,
+                                              pattern: event.target.value,
+                                            }
+                                          : item,
                                     ),
                                   })
                                 }
@@ -418,8 +728,14 @@ export function App(): React.JSX.Element {
                                 value={row.replacement}
                                 onChange={(event) =>
                                   patchConfig({
-                                    renameRules: config.renameRules.map((item, itemIndex) =>
-                                      itemIndex === index ? { ...item, replacement: event.target.value } : item,
+                                    renameRules: config.renameRules.map(
+                                      (item, itemIndex) =>
+                                        itemIndex === index
+                                          ? {
+                                              ...item,
+                                              replacement: event.target.value,
+                                            }
+                                          : item,
                                     ),
                                   })
                                 }
@@ -431,8 +747,14 @@ export function App(): React.JSX.Element {
                                 value={row.flags}
                                 onChange={(event) =>
                                   patchConfig({
-                                    renameRules: config.renameRules.map((item, itemIndex) =>
-                                      itemIndex === index ? { ...item, flags: event.target.value } : item,
+                                    renameRules: config.renameRules.map(
+                                      (item, itemIndex) =>
+                                        itemIndex === index
+                                          ? {
+                                              ...item,
+                                              flags: event.target.value,
+                                            }
+                                          : item,
                                     ),
                                   })
                                 }
@@ -443,7 +765,13 @@ export function App(): React.JSX.Element {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => patchConfig({ renameRules: config.renameRules.filter((_, itemIndex) => itemIndex !== index) })}
+                                onClick={() =>
+                                  patchConfig({
+                                    renameRules: config.renameRules.filter(
+                                      (_, itemIndex) => itemIndex !== index,
+                                    ),
+                                  })
+                                }
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -461,7 +789,14 @@ export function App(): React.JSX.Element {
                     title="Delete rules"
                     description="Regex filters applied to proxy names after rename processing."
                     addLabel="Add delete rule"
-                    onAdd={() => patchConfig({ deleteRules: [...config.deleteRules, createEmptyDeleteRule()] })}
+                    onAdd={() =>
+                      patchConfig({
+                        deleteRules: [
+                          ...config.deleteRules,
+                          createEmptyDeleteRule(),
+                        ],
+                      })
+                    }
                   >
                     <Table>
                       <TableHeader>
@@ -479,8 +814,14 @@ export function App(): React.JSX.Element {
                                 value={row.pattern}
                                 onChange={(event) =>
                                   patchConfig({
-                                    deleteRules: config.deleteRules.map((item, itemIndex) =>
-                                      itemIndex === index ? { ...item, pattern: event.target.value } : item,
+                                    deleteRules: config.deleteRules.map(
+                                      (item, itemIndex) =>
+                                        itemIndex === index
+                                          ? {
+                                              ...item,
+                                              pattern: event.target.value,
+                                            }
+                                          : item,
                                     ),
                                   })
                                 }
@@ -492,8 +833,14 @@ export function App(): React.JSX.Element {
                                 value={row.flags}
                                 onChange={(event) =>
                                   patchConfig({
-                                    deleteRules: config.deleteRules.map((item, itemIndex) =>
-                                      itemIndex === index ? { ...item, flags: event.target.value } : item,
+                                    deleteRules: config.deleteRules.map(
+                                      (item, itemIndex) =>
+                                        itemIndex === index
+                                          ? {
+                                              ...item,
+                                              flags: event.target.value,
+                                            }
+                                          : item,
                                     ),
                                   })
                                 }
@@ -504,7 +851,13 @@ export function App(): React.JSX.Element {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => patchConfig({ deleteRules: config.deleteRules.filter((_, itemIndex) => itemIndex !== index) })}
+                                onClick={() =>
+                                  patchConfig({
+                                    deleteRules: config.deleteRules.filter(
+                                      (_, itemIndex) => itemIndex !== index,
+                                    ),
+                                  })
+                                }
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -518,11 +871,15 @@ export function App(): React.JSX.Element {
 
                 <TabsContent value="headers">
                   <EditorTableCard
-                    icon={<BadgeCheck className="h-5 w-5 text-[var(--accent)]" />}
+                    icon={
+                      <BadgeCheck className="h-5 w-5 text-[var(--accent)]" />
+                    }
                     title="Subscribe request headers"
                     description="Additional headers sent when requesting the final subscribe URL. User-Agent may override the default Clash UA."
                     addLabel="Add header"
-                    onAdd={() => syncHeaders([...headerRows, { key: "", value: "" }])}
+                    onAdd={() =>
+                      syncHeaders([...headerRows, { key: "", value: "" }])
+                    }
                   >
                     <Table>
                       <TableHeader>
@@ -541,7 +898,9 @@ export function App(): React.JSX.Element {
                                 onChange={(event) =>
                                   syncHeaders(
                                     headerRows.map((item, itemIndex) =>
-                                      itemIndex === index ? { ...item, key: event.target.value } : item,
+                                      itemIndex === index
+                                        ? { ...item, key: event.target.value }
+                                        : item,
                                     ),
                                   )
                                 }
@@ -554,7 +913,9 @@ export function App(): React.JSX.Element {
                                 onChange={(event) =>
                                   syncHeaders(
                                     headerRows.map((item, itemIndex) =>
-                                      itemIndex === index ? { ...item, value: event.target.value } : item,
+                                      itemIndex === index
+                                        ? { ...item, value: event.target.value }
+                                        : item,
                                     ),
                                   )
                                 }
@@ -562,7 +923,17 @@ export function App(): React.JSX.Element {
                               />
                             </TableCell>
                             <TableCell>
-                              <Button variant="ghost" size="icon" onClick={() => syncHeaders(headerRows.filter((_, itemIndex) => itemIndex !== index))}>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() =>
+                                  syncHeaders(
+                                    headerRows.filter(
+                                      (_, itemIndex) => itemIndex !== index,
+                                    ),
+                                  )
+                                }
+                              >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </TableCell>
@@ -581,19 +952,26 @@ export function App(): React.JSX.Element {
                           <KeyRound className="h-5 w-5 text-[var(--accent)]" />
                           Public access token
                         </CardTitle>
-                        <CardDescription>Rotate the token used by `/sub/{'{accessToken}'}`. This does not affect the admin token.</CardDescription>
+                        <CardDescription>
+                          Rotate the token used by `/sub/{"{accessToken}"}`.
+                          This does not affect the admin token.
+                        </CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-4">
                         <Input
                           value={config.accessToken}
-                          onChange={(event) => patchConfig({ accessToken: event.target.value })}
+                          onChange={(event) =>
+                            patchConfig({ accessToken: event.target.value })
+                          }
                           placeholder="new-public-token"
                           className="font-mono"
                         />
                         <Alert>
                           <AlertTitle>Rotation behavior</AlertTitle>
                           <AlertDescription>
-                            Saving this field immediately invalidates the previous subscription link. The admin console session remains active because it is cookie-based.
+                            Saving this field immediately invalidates the
+                            previous subscription link. The admin console
+                            session remains active because it is cookie-based.
                           </AlertDescription>
                         </Alert>
                       </CardContent>
@@ -604,11 +982,21 @@ export function App(): React.JSX.Element {
                         <CardTitle className="text-2xl">Guardrails</CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-4 text-sm leading-7 text-[var(--muted-foreground)]">
-                        <p>The admin token is intentionally not editable here. That prevents accidental lockouts and keeps the bootstrap secret managed offline.</p>
+                        <p>
+                          The admin token is intentionally not editable here.
+                          That prevents accidental lockouts and keeps the
+                          bootstrap secret managed offline.
+                        </p>
                         <Separator />
-                        <p>If you change the public token, the save flow shows a confirmation dialog before writing to KV.</p>
+                        <p>
+                          If you change the public token, the save flow shows a
+                          confirmation dialog before writing to KV.
+                        </p>
                         <Separator />
-                        <p>Use a high-entropy token because it acts as a bearer credential for the YAML subscription endpoint.</p>
+                        <p>
+                          Use a high-entropy token because it acts as a bearer
+                          credential for the YAML subscription endpoint.
+                        </p>
                       </CardContent>
                     </Card>
                   </section>
@@ -624,7 +1012,8 @@ export function App(): React.JSX.Element {
           <DialogHeader>
             <DialogTitle>Rotate the public token?</DialogTitle>
             <DialogDescription>
-              Existing subscription URLs will stop working as soon as this save completes. The admin session cookie will remain valid.
+              Existing subscription URLs will stop working as soon as this save
+              completes. The admin session cookie will remain valid.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

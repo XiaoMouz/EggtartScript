@@ -45,6 +45,13 @@ export interface FetchSubscriptionParams {
   timeoutMs: number;
 }
 
+export interface SubscriptionFetchResult {
+  yamlText: string;
+  authData: string;
+  subscribeUrl: string;
+  metadataHeaders: Record<string, string>;
+}
+
 export interface UpstreamConfig {
   eggtartEmail: string;
   eggtartPassword: string;

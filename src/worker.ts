@@ -13,6 +13,19 @@ import type { AssetsBinding, Env, HttpError } from "./types.ts";
 
 const ADMIN_APP_PREFIX = "/admin/_app";
 
+function buildSubscriptionResponseHeaders(metadataHeaders: Record<string, string>): Headers {
+  const headers = new Headers({
+    "Content-Type": "text/yaml; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+
+  for (const [key, value] of Object.entries(metadataHeaders)) {
+    headers.set(key, value);
+  }
+
+  return headers;
+}
+
 function jsonResponse(data: unknown, status = 200, headers?: HeadersInit): Response {
   return new Response(JSON.stringify(data, null, 2), {
     status,
@@ -43,14 +56,14 @@ function getAssetBinding(env: Env): AssetsBinding {
   return env.ASSETS;
 }
 
-async function handleSubscription(env: Env): Promise<Response> {
+async function handleSubscription(method: "GET" | "HEAD", env: Env): Promise<Response> {
   const config = loadEnvConfig(env);
   const transformConfig = await loadTransformConfig(env.EGGTART_CONFIG_KV);
   const clashUserAgent = transformConfig.headers["User-Agent"] || config.clashUserAgent;
   const subscribeHeaders = { ...transformConfig.headers };
   delete subscribeHeaders["User-Agent"];
 
-  const { yamlText } = await fetchSubscriptionYaml({
+  const { yamlText, metadataHeaders } = await fetchSubscriptionYaml({
     baseUrl: config.baseUrl,
     email: config.eggtartEmail,
     password: config.eggtartPassword,
@@ -59,17 +72,17 @@ async function handleSubscription(env: Env): Promise<Response> {
     timeoutMs: config.requestTimeoutMs,
   });
 
+  const responseHeaders = buildSubscriptionResponseHeaders(metadataHeaders);
+  if (method === "HEAD") {
+    return new Response(null, { headers: responseHeaders });
+  }
+
   const outputYaml = transformClashYaml(yamlText, transformConfig);
-  return new Response(outputYaml, {
-    headers: {
-      "Content-Type": "text/yaml; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
+  return new Response(outputYaml, { headers: responseHeaders });
 }
 
 async function handleSubRoute(request: Request, env: Env, token: string): Promise<Response> {
-  if (request.method !== "GET") {
+  if (request.method !== "GET" && request.method !== "HEAD") {
     return new Response("Method Not Allowed", { status: 405 });
   }
 
@@ -80,7 +93,7 @@ async function handleSubRoute(request: Request, env: Env, token: string): Promis
   if (token !== accessToken) {
     throw createHttpError("Invalid access token", 403);
   }
-  return handleSubscription(env);
+  return handleSubscription(request.method, env);
 }
 
 async function handleAdminLogin(env: Env, token: string): Promise<Response> {

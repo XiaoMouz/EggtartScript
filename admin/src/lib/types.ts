@@ -22,3 +22,14 @@ export interface EditableConfigPayload {
   headers: Record<string, string>;
   accessToken: string;
 }
+
+export interface SubscriptionMetadataSnapshot {
+  profileTitle: string | null;
+  contentDisposition: string | null;
+  profileUpdateInterval: string | null;
+  rawUserInfo: string | null;
+  uploadBytes: number | null;
+  downloadBytes: number | null;
+  totalBytes: number | null;
+  expireAt: number | null;
+}
