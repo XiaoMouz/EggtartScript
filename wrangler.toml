@@ -9,7 +9,7 @@ run_worker_first = true
 
 [[kv_namespaces]]
 binding = "EGGTART_CONFIG_KV"
-id = "replace-with-your-kv-namespace-id"
+id = "e2e91831e3d1498dbb77ae7e315d6766"
 
 [observability]
 enabled = false
