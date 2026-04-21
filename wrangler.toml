@@ -1,4 +1,4 @@
-name = "eggtart-subscription-worker"
+name = 'eggtart-script'
 main = "src/worker.ts"
 compatibility_date = "2026-04-21"
 
@@ -10,3 +10,18 @@ run_worker_first = true
 [[kv_namespaces]]
 binding = "EGGTART_CONFIG_KV"
 id = "replace-with-your-kv-namespace-id"
+
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = true
+persist = true
+head_sampling_rate = 1
