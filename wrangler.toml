@@ -1,8 +1,12 @@
 name = "eggtart-subscription-worker"
-main = "src/worker.js"
+main = "src/worker.ts"
 compatibility_date = "2026-04-21"
 
-[[kv_namespaces]]
-binding = "RULES_KV"
-id = "replace-with-your-kv-namespace-id"
+[assets]
+directory = "./admin/dist"
+binding = "ASSETS"
+run_worker_first = true
 
+[[kv_namespaces]]
+binding = "EGGTART_CONFIG_KV"
+id = "replace-with-your-kv-namespace-id"

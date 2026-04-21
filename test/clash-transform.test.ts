@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { transformClashYaml } from "../src/clash-transform.js";
+import { transformClashYaml } from "../src/clash-transform.ts";
 
 test("applies rename/delete/proxy-chain/rule append transforms", () => {
   const input = `
@@ -22,6 +22,7 @@ rules:
     proxyChain: [{ target: "HKG-A", dialer: "Chain-Node" }],
     renameRules: [{ pattern: "^HK-", replacement: "HKG-", flags: "" }],
     deleteRules: [{ pattern: "^US-", flags: "" }],
+    headers: {},
   });
 
   assert.match(output, /name: HKG-A/);

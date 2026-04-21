@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0d0b09;
+  --foreground: #f5eee4;
+  --muted-foreground: #b4a796;
+  --panel: rgba(20, 18, 16, 0.96);
+  --accent: #e4b363;
+  --accent-strong: #f1c776;
+  --accent-foreground: #17110a;
+  --ring: rgba(228, 179, 99, 0.42);
+  font-family:
+    "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "URW Palladio L",
+    "Source Serif 4", serif;
+  color: var(--foreground);
+  background: var(--background);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--background);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+body,
+button,
+input,
+textarea,
+table {
+  font-family:
+    "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "URW Palladio L",
+    "Source Serif 4", serif;
+}
+
+code,
+pre,
+textarea.font-mono,
+.font-mono {
+  font-family: "SF Mono", "IBM Plex Mono", "Cascadia Mono", Consolas, monospace;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(228, 179, 99, 0.32);
+  color: var(--foreground);
+}
