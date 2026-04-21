@@ -1,0 +1,22 @@
+{
+  "name": "EggtartScript",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker for Eggtart subscription proxy and Clash YAML transforms",
+  "type": "module",
+  "main": "src/worker.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "wrangler": "^4.13.2"
+  },
+  "packageManager": "pnpm@10.22.0"
+}
